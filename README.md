@@ -83,19 +83,19 @@ SELECT * FROM customer WHERE (customer_id= ? OR address_id= ?) AND active= ?
 ### 1) 조인 등 쿼리 연산 증가
 | 번호  | useServerPrepStmts | cachePrepStmts | 실행시간    |
 | --- | ------------------ | -------------- | ------- |
-| 1   | true               | true           | 9994ms  |
-| 2   | true               | false          | 11781ms |
-| 3   | false              | true           | 8914ms  |
-| 4   | false              | false          | 8289ms  |
+| [1](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L89)   | true               | true           | 9994ms  |
+| [2](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L90)   | true               | false          | 11781ms |
+| [3](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L91)   | false              | true           | 8914ms  |
+| [4](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L92)   | false              | false          | 8289ms  |
 
 ### 2) 동적 바인딩 파라미터 개수 증가
 
 | 번호 | useServerPrepStmts | cachePrepStmts | 실행시간 |
 | --- | --- | --- | --- |
-| 1 | true | true | 1340ms |
-| 2 | true | false | 3139ms |
-| 3 | false | true | 1760ms |
-| 4 | false | false | 1737ms |
+| [1](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L93) | true | true | 1340ms |
+| [2](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L94) | true | false | 3139ms |
+| [3](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L95) | false | true | 1760ms |
+| [4](https://github.com/nnyouung/prepared-statement-test/blob/main/PreparedStatementTest.java#L96) | false | false | 1737ms |
 
 결과를 이해하기 위해 MySQL Connector/J 8.4.0 소스코드를 직접 디버깅했다.
 
@@ -141,13 +141,13 @@ true:  COM_STMT_EXECUTE → 1회 (캐시 히트 이후)
 
 통신 횟수가 같음에도 성능 차이가 나타난다면, 패킷 구성 복잡도 차이가 영향을 줄 것으로 추정된다.
 
-### true + false가 항상 가장 느린 이유
+### `useServerPrepStmts=true` + `cachePrepStmts=false`가 항상 가장 느린 이유
 
 캐시를 사용하지 않으면 매 반복마다 `COM_STMT_PREPARE`와 `COM_STMT_CLOSE`가 추가로 발생한다. 이 오버헤드가 누적되어 일관되게 가장 낮은 성능을 보였다.
 
 ## 6. 결론
 
-단일 Connection에서 동일 쿼리를 반복하는 구조상, 네 설정 모두 실제 데이터 처리 비용은 동일하다. 설정 차이가 영향을 주는 영역은 파싱 및 Prepared 단계뿐이며, 이 비용이 전체 실행 시간에서 차지하는 비중이 작아 유의미한 차이가 나타나지 않았을 가능성이 높다.
+단일 Connection에서 동일 쿼리를 반복하는 구조상, 네 개의 설정 모두 실제 데이터 처리 비용은 동일하다. 설정 차이가 영향을 주는 영역은 파싱 및 Prepared 단계뿐이며, 이 비용이 전체 실행 시간에서 차지하는 비중이 작아 유의미한 차이가 나타나지 않았을 가능성이 높다.
 
 소스코드 분석으로 패킷 구성 복잡도 차이를 확인했으나, 성능 차이의 직접적인 원인으로 단정하기는 어렵다. 쿼리 특성에 따라 결과가 달라졌기 때문이다.
 
