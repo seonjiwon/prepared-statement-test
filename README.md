@@ -97,12 +97,65 @@ SELECT * FROM customer WHERE (customer_id= ? OR address_id= ?) AND active= ?
 | 3 | false | true | 1760ms |
 | 4 | false | false | 1737ms |
 
-단순 쿼리에서는 파싱 비용이 작기 때문에 설정 간 차이가 크지 않았다고 판단하였고, 이를 검증하기 위해 조인 및 집계가 포함된 복잡한 쿼리로 테스트를 확장하였다. 그러나 **복잡한 쿼리에서도 결과는 기존 테스트와 유사한 경향을 보였다.**
+결과를 이해하기 위해 MySQL Connector/J 8.4.0 소스코드를 직접 디버깅했다.
 
-이는 동일한 쿼리를 단일 Connection 환경에서 반복 실행하는 구조에서, 네 가지 설정 모두 실제 데이터 처리 비용이 거의 동일하게 발생하기 때문으로 추정하고 있다.
+### 두 방식의 실제 동작
 
-**설정에 따라 달라질 수 있는 영역은 파싱 및 Prepared 단계에 한정되지만, 해당 비용이 전체 실행 시간에서 차지하는 비중이 크지 않았기 때문**에 useServerPrepStmts 및 cachePrepStmts 조합에 따른 차이가 유의미하게 나타나지 않았을 가능성이 높다.
+`pstmt.executeQuery()` 호출 시 두 방식은 서로 다른 패킷을 만들어 서버로 전송한다.
 
-다만, 서버 PREPARE를 사용하면서 캐시를 사용하지 않는 조합은 매 반복마다 PREPARE 및 DEALLOCATE가 수행되므로 추가적인 오버헤드가 발생하며, 이로 인해 일관되게 가장 낮은 성능을 보였다고 추정한다.
+**useServerPrepStmts=false — buildComQuery()**
 
-결과적으로 본 실험 환경에서는 서버 PreparedStatement 재사용의 이점이 제한적으로 나타났으며, 실제 운영 환경과 같이 다중 Connection, 다양한 쿼리 등이 존재하는 상황에서는 다른 결과가 나타날 가능성도 있다.
+```java
+packet.writeInteger(IntegerDataType.INT1, NativeConstants.COM_QUERY);
+// SQL 조각 + 값을 이어붙여서 텍스트로 씀
+sendPacket.writeBytes(..., staticSqlStrings[i]);
+bindValues[i].writeAsText(sendPacket);
+```
+
+`?` 기준으로 쪼개진 SQL 조각에 값을 끼워넣는 단순 문자열 연산이다.  
+완성된 SQL 문자열을 `COM_QUERY` 하나로 전송한다.
+
+**useServerPrepStmts=true — buildComStmtExecute()**
+
+```java
+packet.writeInteger(IntegerDataType.INT1, NativeConstants.COM_STMT_EXECUTE);
+packet.writeInteger(IntegerDataType.INT4, serverStatementId);
+packet.writeInteger(IntegerDataType.INT1, flags);
+packet.writeInteger(IntegerDataType.INT4, 1);
+// null 비트맵 구성
+// 타입 정보 전송 여부 판단
+// 값을 바이너리로 씀
+parameterBindings[i].writeAsBinary(packet);
+```
+
+null 비트맵 계산, 타입 정보 판단, 바이너리 직렬화 등 패킷 구성이 훨씬 복잡하다.
+
+### 캐시가 동작하면 통신 횟수는 같다
+
+`cachePrepStmts=true`로 PREPARE가 캐시된 이후에는 통신 횟수가 동일하다.
+
+```
+false: COM_QUERY        → 1회
+true:  COM_STMT_EXECUTE → 1회 (캐시 히트 이후)
+```
+
+통신 횟수가 같음에도 성능 차이가 나타난다면, 패킷 구성 복잡도 차이가 영향을 줄 것으로 추정된다.
+
+### true + false가 항상 가장 느린 이유
+
+캐시를 사용하지 않으면 매 반복마다 `COM_STMT_PREPARE`와 `COM_STMT_CLOSE`가 추가로 발생한다. 이 오버헤드가 누적되어 일관되게 가장 낮은 성능을 보였다.
+
+## 6. 결론
+
+단일 Connection에서 동일 쿼리를 반복하는 구조상, 네 설정 모두 실제 데이터 처리 비용은 동일하다. 설정 차이가 영향을 주는 영역은 파싱 및 Prepared 단계뿐이며, 이 비용이 전체 실행 시간에서 차지하는 비중이 작아 유의미한 차이가 나타나지 않았을 가능성이 높다.
+
+소스코드 분석으로 패킷 구성 복잡도 차이를 확인했으나, 성능 차이의 직접적인 원인으로 단정하기는 어렵다. 쿼리 특성에 따라 결과가 달라졌기 때문이다.
+
+| 테스트 | 가장 빠른 설정 |
+|--------|--------------|
+| 조인 등 쿼리 연산 증가 | `false + false` (8289ms) |
+| 동적 바인딩 파라미터 증가 | `true + true` (1340ms) |
+
+본 실험은 단일 Connection, 단일 쿼리 환경으로 제한적이다. 다중 Connection, 다양한 쿼리가 존재하는 실제 운영 환경에서는 다른 결과가 나타날 수 있다.
+
+**최적 설정은 실제 서비스 환경에서 직접 벤치마크하는 것 외에 정답이 없다.**
