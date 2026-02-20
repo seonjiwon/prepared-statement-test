@@ -103,7 +103,7 @@ SELECT * FROM customer WHERE (customer_id= ? OR address_id= ?) AND active= ?
 
 `pstmt.executeQuery()` 호출 시 두 방식은 서로 다른 패킷을 만들어 서버로 전송한다.
 
-**useServerPrepStmts=false — [buildComQuery()] (https://github.com/mysql/mysql-connector-j/blob/1c3f5c149e0bfe31c7fbeb24e2d260cd890972c4/src/main/protocol-impl/java/com/mysql/cj/protocol/a/NativeMessageBuilder.java#L287)**
+**useServerPrepStmts=false — [buildComQuery()](https://github.com/mysql/mysql-connector-j/blob/1c3f5c149e0bfe31c7fbeb24e2d260cd890972c4/src/main/protocol-impl/java/com/mysql/cj/protocol/a/NativeMessageBuilder.java#L287)**
 
 ```java
 packet.writeInteger(IntegerDataType.INT1, NativeConstants.COM_QUERY);
@@ -115,7 +115,7 @@ bindValues[i].writeAsText(sendPacket);
 `?` 기준으로 쪼개진 SQL 조각에 값을 끼워넣는 단순 문자열 연산이다.  
 완성된 SQL 문자열을 `COM_QUERY` 하나로 전송한다.
 
-**useServerPrepStmts=true — buildComStmtExecute()**
+**useServerPrepStmts=true — [buildComStmtExecute()](https://github.com/mysql/mysql-connector-j/blob/1c3f5c149e0bfe31c7fbeb24e2d260cd890972c4/src/main/protocol-impl/java/com/mysql/cj/protocol/a/NativeMessageBuilder.java#L391)**
 
 ```java
 packet.writeInteger(IntegerDataType.INT1, NativeConstants.COM_STMT_EXECUTE);
